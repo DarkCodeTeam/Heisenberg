@@ -7,9 +7,7 @@ const {
     addAdmin,
     removeAdmin,
     addLearningResponse,
-    deleteResponsesByKeyword,
-    saveGif,
-    getRandomGif
+    deleteResponsesByKeyword
 } = require('./utils/responseManager');
 const { getShamsiDate, getGregorianDate } = require('./utils/dateManager');
 const config = require('./config.json');
@@ -51,77 +49,64 @@ bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text || "";
     const userId = msg.from.id;
+    const isPrivateChat = msg.chat.type === 'private'; 
 
-    await addUser(msg.from);
+    try {
+        await addUser(msg.from);
 
-    const isAdmin = admins.some(admin => admin.id === userId);
+        const isAdmin = admins.some(admin => admin.id === userId);
 
-    if (!isFirstAdminSet) {
-        if (!isAdmin) {
-            await addAdmin(msg.from);
-            isFirstAdminSet = true;
-            return bot.sendMessage(chatId, "شما به عنوان مدیر انتخاب شدید.");
-        }
-    } else {
-        if (isAdmin) {
-            return await handleAdminCommands(chatId, msg, text);
-        }
-    }
-
-    if (text.startsWith("+")) {
-        return await handleAiQuery(chatId, text.slice(1).trim(), msg.message_id);
-    }
-
-    if (text.includes("تاریخ")) {
-        return await sendDate(chatId);
-    }
-
-    if (text.toLowerCase().startsWith("عکس ")) {
-        return await handleImageRequest(chatId, text.replace("عکس", "").trim());
-    }
-
-    messageCount++;
-    activeUsers[userId] = (activeUsers[userId] || 0) + 1;
-
-    if (msg.forward_from) {
-        forwardedCount++;
-    }
-    if (msg.video) {
-        videoCount++;
-        if (msg.from.is_selfie) selfieVideoCount++;
-    }
-    if (msg.audio) {
-        audioCount++;
-    }
-    if (msg.voice) {
-        voiceCount++;
-    }
-    if (msg.photo) {
-        photoCount++;
-    }
-    if (msg.document && msg.document.mime_type === 'image/gif') {
-        gifCount++;
-        await saveGif(msg.document.file_id, msg.document.file_name || `gif_${Date.now()}.gif`, bot, config.token); // ذخیره گیف
-    }
-    if (msg.sticker) {
-        if (msg.sticker.is_animated) {
-            animatedStickerCount++;
+        if (!isFirstAdminSet && !isPrivateChat) {
+            if (!isAdmin) {
+                await addAdmin(msg.from);
+                isFirstAdminSet = true;
+                return bot.sendMessage(chatId, "شما به عنوان مدیر انتخاب شدید.");
+            }
         } else {
-            stickerCount++;
+            if (isAdmin && !isPrivateChat) { 
+                return await handleAdminCommands(chatId, msg, text);
+            }
         }
-    }
 
-    // چت کردن ربات با گیف (20% احتمال ارسال گیف)
-    if (Math.random() < 0.2) {
-        const randomGif = await getRandomGif();
-        if (randomGif) {
-            await bot.sendAnimation(chatId, randomGif);
+        if (text.startsWith("+")) {
+            return await handleAiQuery(chatId, text.slice(1).trim(), msg.message_id);
         }
-    }
 
-    const response = await getRandomResponse(text);
-    if (response) {
-        await bot.sendMessage(chatId, response, { reply_to_message_id: msg.message_id });
+        if (text.includes("تاریخ")) {
+            return await sendDate(chatId);
+        }
+
+        if (text.toLowerCase().startsWith("عکس ")) {
+            return await handleImageRequest(chatId, text.replace("عکس", "").trim());
+        }
+
+        messageCount++;
+        activeUsers[userId] = (activeUsers[userId] || 0) + 1;
+
+        if (msg.forward_from) forwardedCount++;
+        if (msg.video) {
+            videoCount++;
+            if (msg.from.is_selfie) selfieVideoCount++;
+        }
+        if (msg.audio) audioCount++;
+        if (msg.voice) voiceCount++;
+        if (msg.photo) photoCount++;
+        if (msg.document && msg.document.mime_type === 'image/gif') gifCount++;
+        if (msg.sticker) {
+            if (msg.sticker.is_animated) animatedStickerCount++;
+            else stickerCount++;
+        }
+
+        const response = await getRandomResponse(text);
+        if (response) {
+            await bot.sendMessage(chatId, response, { reply_to_message_id: msg.message_id });
+        }
+    } catch (error) {
+        if (error.response && error.response.body.error_code === 403) {
+            console.log(`Bot was kicked from chat ${chatId}, skipping.`);
+        } else {
+            console.error('Error in handling message:', error);
+        }
     }
 });
 
@@ -192,7 +177,7 @@ async function sendDate(chatId) {
 async function sendStatusReport(chatId) {
     const shamsiDate = getShamsiDate();
     const gregorianDate = getGregorianDate();
-    const currentTime = new Date().toLocaleTimeString('fa-IR');
+    const currentTime = getTime();
 
     let topUser = { name: "هیچ‌کس", count: 0 };
     for (let userId in activeUsers) {
